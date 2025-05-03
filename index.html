@@ -1,2 +1,290 @@
 <!DOCTYPE html>
-<!-- Full HTML content inserted here -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Child Medicine Dose Scheduler</title>
+  <meta name="theme-color" content="#4CAF50">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    button { margin-right: 10px; padding: 10px 15px; font-size: 16px; cursor: pointer; }
+    #output ul { list-style-type: none; padding-left: 0; }
+    #output li { margin-bottom: 10px; }
+    .highlight { font-weight: bold; color: #4CAF50; }
+    .info { background-color: #e7f4e4; padding: 10px; border-radius: 5px; margin-top: 10px; font-size: 14px; color: #2e7d32; }
+    .paracetamol-box { background-color: #f3e8ff; border: 3px solid #c084fc; padding: 15px; border-radius: 8px; margin-top: 20px; }
+    .ibuprofen-box { background-color: #fff4e5; border: 3px solid #f59e0b; padding: 15px; border-radius: 8px; margin-top: 20px; }
+    .recommended-box { background-color: #e0f2fe; border: 3px solid #38bdf8; padding: 15px; border-radius: 8px; margin-top: 20px; margin-bottom: 20px; }
+    .divider { border: none; border-top: 2px solid #cccccc; margin: 20px 0; }
+    .tip { font-size: 13px; color: #666; margin-top: 5px; }
+    input[type='time'] { margin-right: 10px; }
+    input[type='checkbox'] { transform: scale(1.2); cursor: pointer; }
+    .given { text-decoration: line-through; color: grey; }
+    .dose-row { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+    .dose-row span { min-width: 80px; display: inline-block; font-size: 14px; color: #333; }
+  </style>
+</head>
+<body>
+  <h1>Child Medicine Dose Scheduler</h1>
+
+  <label for="childAge">Child's Age:</label>
+  <input type="number" id="childAge" step="0.1">
+  <select id="ageUnit">
+    <option value="years">years</option>
+    <option value="months">months</option>
+  </select>
+  <p class="tip">ℹ️ If your child is under 1 year old, it's usually easier to enter their age in months.</p><br>
+
+  <label for="paracetamolTime">First Paracetamol Time:</label>
+  <input type="time" id="paracetamolTime"><br><br>
+
+  <label for="ibuprofenTime">First Ibuprofen Time:</label>
+  <input type="time" id="ibuprofenTime"><br><br>
+
+  <button id="calculateButton">Calculate Schedule</button>
+  <button id="resetButton">Reset</button>
+
+  <div id="output" style="margin-top: 20px;"></div>
+
+<script>
+let schedules = { paracetamol: [], ibuprofen: [] };
+
+function formatAMPM(time) {
+  const [hours, minutes] = time.split(':').map(Number);
+  const date = new Date();
+  date.setHours(hours);
+  date.setMinutes(minutes);
+  let hoursFormatted = date.getHours() % 12 || 12;
+  let ampm = date.getHours() >= 12 ? 'PM' : 'AM';
+  return `${hoursFormatted}:${String(minutes).padStart(2, '0')} ${ampm}`;
+}
+
+function saveState() {
+  const state = {
+    childAge: document.getElementById('childAge').value,
+    ageUnit: document.getElementById('ageUnit').value,
+    paracetamolTime: document.getElementById('paracetamolTime').value,
+    ibuprofenTime: document.getElementById('ibuprofenTime').value,
+    schedules: schedules
+  };
+  localStorage.setItem('medSchedulerState', JSON.stringify(state));
+}
+
+function loadState() {
+  const saved = localStorage.getItem('medSchedulerState');
+  if (!saved) return;
+  const state = JSON.parse(saved);
+  document.getElementById('childAge').value = state.childAge;
+  document.getElementById('ageUnit').value = state.ageUnit;
+  document.getElementById('paracetamolTime').value = state.paracetamolTime;
+  document.getElementById('ibuprofenTime').value = state.ibuprofenTime;
+  schedules = state.schedules || { paracetamol: [], ibuprofen: [] };
+
+  const hasAllInputs = state.childAge && (state.paracetamolTime || state.ibuprofenTime);
+  if (hasAllInputs) {
+    setTimeout(() => {
+      calculateSchedule();
+      setTimeout(() => {
+        const meds = ['paracetamol', 'ibuprofen'];
+        meds.forEach(med => {
+          if (schedules[med] && schedules[med].length > 0) {
+            schedules[med].forEach((dose, index) => {
+              if (dose.given) {
+                const checkbox = document.querySelector(`#${med}-dose-${index} input[type='checkbox']`);
+                if (checkbox && !checkbox.checked) {
+                  checkbox.checked = true;
+                  document.getElementById(`${med}-dose-${index}`).classList.add('given');
+                }
+              }
+            });
+            checkMaxDose(med);
+          }
+        });
+      }, 350);
+    }, 50);
+  }
+}
+
+function resetFields() {
+  document.getElementById('childAge').value = '';
+  document.getElementById('ageUnit').value = 'years';
+  document.getElementById('paracetamolTime').value = '';
+  document.getElementById('ibuprofenTime').value = '';
+  document.getElementById('output').innerHTML = '';
+  schedules = { paracetamol: [], ibuprofen: [] };
+  localStorage.removeItem('medSchedulerState');
+}
+
+function checkMaxDose(medication) {
+  const allGiven = schedules[medication].every(dose => dose.given);
+  const box = document.querySelector(`.${medication}-box`);
+  if (!box) return;
+
+  let message = box.querySelector('.max-dose-msg');
+
+  if (!allGiven) {
+    if (message) message.remove();
+    return;
+  }
+
+  if (!message) {
+    message = document.createElement('div');
+    message.className = 'info max-dose-msg';
+    box.appendChild(message);
+  }
+
+  const firstDose = schedules[medication][0].time;
+  const [hour, minute] = firstDose.split(':').map(Number);
+  const nextDate = new Date();
+  nextDate.setHours(hour, minute, 0, 0);
+  nextDate.setDate(nextDate.getDate() + 1);
+  const nextTime = `${String(nextDate.getHours()).padStart(2, '0')}:${String(nextDate.getMinutes()).padStart(2, '0')}`;
+  message.innerHTML = `✅ Maximum dose given. Next safe dose: <strong>${formatAMPM(nextTime)}</strong>`;
+}
+
+function toggleGiven(medication, index) {
+  schedules[medication][index].given = !schedules[medication][index].given;
+  const doseItem = document.getElementById(`${medication}-dose-${index}`);
+  if (schedules[medication][index].given) {
+    doseItem.classList.add('given');
+  } else {
+    doseItem.classList.remove('given');
+  }
+  checkMaxDose(medication);
+  saveState();
+}
+
+function editTime(medication, index, intervalHours) {
+  const list = document.getElementById(`${medication}-list`);
+  const inputs = list.querySelectorAll('input[type="time"]');
+  const newTime = inputs[index].value;
+  if (!newTime) return;
+
+  let [hour, minute] = newTime.split(':').map(Number);
+  let baseDate = new Date();
+  baseDate.setHours(hour, minute, 0, 0);
+
+  for (let i = index; i < schedules[medication].length; i++) {
+    let hours = baseDate.getHours();
+    let minutes = baseDate.getMinutes();
+    let localTime = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+    schedules[medication][i].time = localTime;
+    inputs[i].value = localTime;
+    const friendlyLabel = document.getElementById(`${medication}-friendly-${i}`);
+    friendlyLabel.innerText = formatAMPM(localTime);
+    baseDate.setHours(baseDate.getHours() + intervalHours);
+  }
+  checkMaxDose(medication);
+  saveState();
+}
+
+function createEditableSchedule(firstDose, intervalHours, doses, label, key, boxClass) {
+  if (!firstDose) return '';
+  const [hour, minute] = firstDose.split(':').map(Number);
+  if (isNaN(hour) || isNaN(minute)) return '';
+
+  let schedule = [];
+  let doseTime = new Date();
+  doseTime.setHours(hour, minute, 0, 0);
+
+  const saved = schedules[key] || [];
+
+  for (let i = 0; i < doses; i++) {
+    let hours = doseTime.getHours();
+    let minutes = doseTime.getMinutes();
+    let localTime = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+    const given = saved[i]?.given || false;
+    schedule.push({ time: localTime, given });
+    doseTime.setHours(doseTime.getHours() + intervalHours);
+  }
+
+  schedules[key] = schedule;
+
+  let result = `<div class="${boxClass}"><h3>${label} Schedule</h3><ul id="${key}-list">`;
+  schedule.forEach((dose, index) => {
+    result += `<li class="dose-row${dose.given ? ' given' : ''}" id="${key}-dose-${index}">
+      <input type="checkbox" onchange="toggleGiven('${key}', ${index})" ${dose.given ? 'checked' : ''}>
+      <input type="time" value="${dose.time}" onchange="editTime('${key}', ${index}, ${intervalHours})">
+      <span id="${key}-friendly-${index}">${formatAMPM(dose.time)}</span>
+    </li>`;
+  });
+  result += '</ul></div>';
+  return result;
+}
+
+function calculateSchedule() {
+  document.getElementById('output').innerHTML = '<p>⏳ Calculating...</p>';
+  setTimeout(() => {
+    const childAge = parseFloat(document.getElementById('childAge').value);
+    const ageUnit = document.getElementById('ageUnit').value;
+    const paracetamolTime = document.getElementById('paracetamolTime').value;
+    const ibuprofenTime = document.getElementById('ibuprofenTime').value;
+
+    if (isNaN(childAge) || childAge <= 0) {
+      document.getElementById('output').innerHTML = '<p style="color:red;">Please enter a valid child age.</p>';
+      return;
+    }
+
+    const ageInYears = ageUnit === 'months' ? childAge / 12 : childAge;
+    const ageInMonths = ageUnit === 'months' ? childAge : childAge * 12;
+
+    let output = '<div class="recommended-box">';
+    output += '<h2>Recommended Doses</h2>';
+
+    let paracetamolRecommended = true;
+    let ibuprofenRecommended = true;
+
+    if (ageInMonths < 2) {
+      output += '<p>Paracetamol: ❗ Not recommended without doctor advice (under 2 months).</p>';
+      output += '<p>Ibuprofen: ❗ Not recommended (under 3 months).</p>';
+      paracetamolRecommended = false;
+      ibuprofenRecommended = false;
+    } else if (ageInMonths >= 2 && ageInMonths < 3) {
+      output += '<p>Paracetamol: 2.5 ml - Infant 120mg/5ml (only if post-vaccination or advised by doctor)</p>';
+      output += '<p>Ibuprofen: ❗ Not recommended (under 3 months).</p>';
+      ibuprofenRecommended = false;
+    } else if (ageInMonths >= 3 && ageInMonths < 6) {
+      output += '<p>Paracetamol: 2.5 ml - Infant 120mg/5ml</p>';
+      output += '<p>Ibuprofen: 2.5 ml - Infant 100mg/5ml (only if over 5kg)</p>';
+    } else if (ageInMonths >= 6 && ageInYears < 2) {
+      output += '<p>Paracetamol: 5 ml - Infant 120mg/5ml</p>';
+      output += '<p>Ibuprofen: 2.5 ml - Infant 100mg/5ml</p>';
+    } else if (ageInYears >= 2 && ageInYears < 4) {
+      output += '<p>Paracetamol: 7.5 ml - Infant 120mg/5ml</p>';
+      output += '<p>Ibuprofen: 5 ml - Infant 100mg/5ml</p>';
+    } else if (ageInYears >= 4 && ageInYears < 6) {
+      output += '<p>Paracetamol: 10 ml - Infant 120mg/5ml</p>';
+      output += '<p>Ibuprofen: 7.5 ml - Infant 100mg/5ml</p>';
+    } else {
+      output += '<p>Paracetamol: 5 ml - 6+ Suspension 250mg/5ml</p>';
+      output += '<p style="font-size: 13px; color: #555;">(Stronger concentration — check the label carefully.)</p>';
+      output += '<p>Ibuprofen: 7.5 ml - 100mg/5ml (or check if using 200mg/5ml strength)</p>';
+      output += '<p style="font-size: 13px; color: #555;">(Always check the label or consult a pharmacist if unsure.)</p>';
+    }
+
+    output += '</div><hr class="divider">';
+
+    if (paracetamolRecommended && paracetamolTime) {
+      output += createEditableSchedule(paracetamolTime, 4, 4, 'Paracetamol', 'paracetamol', 'paracetamol-box');
+    }
+    if (ibuprofenRecommended && ibuprofenTime) {
+      output += createEditableSchedule(ibuprofenTime, 6, 3, 'Ibuprofen', 'ibuprofen', 'ibuprofen-box');
+    }
+
+    document.getElementById('output').innerHTML = output;
+    saveState();
+  }, 300);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('calculateButton').addEventListener('click', calculateSchedule);
+  document.getElementById('resetButton').addEventListener('click', resetFields);
+  document.getElementById('childAge').addEventListener('input', calculateSchedule);
+  document.getElementById('ageUnit').addEventListener('change', calculateSchedule);
+  document.getElementById('paracetamolTime').addEventListener('input', calculateSchedule);
+  document.getElementById('ibuprofenTime').addEventListener('input', calculateSchedule);
+  loadState();
+});
+</script>
+</body>
+</html>
